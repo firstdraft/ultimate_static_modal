@@ -1,0 +1,13 @@
+{
+  "name": "ultimate_static_modal-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test modal_controller.test.js"
+  },
+  "devDependencies": {
+    "@hotwired/stimulus": "^3.2.2",
+    "happy-dom": "^15.11.7"
+  }
+}
