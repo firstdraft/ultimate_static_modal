@@ -1,134 +1,179 @@
 # ultimate_static_modal
 
-Static-content companion to [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal) (UTMR).
+Render [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal)'s polished modal and drawer chrome on content that doesn't need to come from the server. Help popovers, confirmation dialogs, navigation drawers, on-page filter UIs — anything that doesn't deserve its own URL.
 
-UTMR renders its `<dialog>` chrome only when the request carries a `Turbo-Frame` header. This gem adds view helpers that render the same chrome — and reuse UTMR's configured flavor classes — for modals and drawers whose content is *not* loaded via a Turbo Frame. Use it for help popovers, client-side confirms, navigation drawers, and other one-off modals that don't warrant their own route.
+<!-- TODO: drop a screenshot or animated GIF of the /testing/static demo page here. -->
 
-## Installation
+[![Gem Version](https://img.shields.io/gem/v/ultimate_static_modal.svg)](https://rubygems.org/gems/ultimate_static_modal)
+
+## Why this exists
+
+UTMR is built for server-driven modals: you click a link, Rails renders the modal contents into a Turbo Frame, the dialog opens. That's a great pattern for forms, show pages, or anything else with real server state.
+
+But sometimes you just want a modal — no route, no controller action, no Turbo Frame — and you want it to look exactly like the rest of your modals. UTMR's `modal()` helper short-circuits when there's no `Turbo-Frame` header on the request, so it can't render those. This gem fills the gap.
+
+## Requirements
+
+You need [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal) v3+ already installed and working in your Rails app. If `link_to ..., data: { turbo_frame: "modal" }` already opens a working modal, you're good. If not, install UTMR first.
+
+## Quickstart
+
+### 1. Install the gem
 
 ```ruby
 # Gemfile
-gem "ultimate_turbo_modal"   # follow its install instructions first
 gem "ultimate_static_modal"
 ```
 
-After installing UTMR (`rails g ultimate_turbo_modal:install`), run our installer:
-
 ```sh
+bundle install
 bin/rails generate ultimate_static_modal:install
 ```
 
-This:
+The generator copies two Stimulus controllers into `app/javascript/controllers/` and wires them up in `controllers/index.js`. Rebuild your JS bundle and restart Rails.
 
-1. Copies a small `static-modal` Stimulus controller into `app/javascript/controllers/static_modal_controller.js` (clones a `<template>` into the DOM on click).
-2. Copies a patched `modal_controller.js` next to it (a fork of UTMR's controller — see *Why we ship a forked controller* below).
-3. Updates `app/javascript/controllers/index.js` to register both controllers and replace UTMR's modal registration with the forked version, while still importing UTMR's npm package for its Turbo event side-effects.
-
-Rebuild your JS bundle and restart Rails.
-
-## Usage
-
-Three view helpers cover the common pattern: parking the modal markup inside a `<template>`, plus a button that clones it on click.
+### 2. Add a modal to any page
 
 ```erb
-<%# Modal %>
-<%= static_modal_template("shortcuts", title: "Keyboard shortcuts") do |m| %>
-  <% m.footer do %>
-    <button type="button" data-action="modal#hideModal">Close</button>
-  <% end %>
-  <dl>
-    <dt>?</dt><dd>Show this dialog</dd>
-    <dt>g h</dt><dd>Go home</dd>
+<%# Anywhere in a view %>
+<%= static_modal_template("hello", title: "Hello there") do %>
+  <p>This is a static modal. No round-trip to the server.</p>
+<% end %>
+
+<%= static_modal_trigger("hello", class: "px-4 py-2 rounded bg-indigo-600 text-white") do %>
+  Open the modal
+<% end %>
+```
+
+### 3. Click the button
+
+The button clones the `<template>` into the page, the modal animates open, ESC / close button / outside-click all dismiss it. Done.
+
+<!-- TODO: screenshot of the result. -->
+
+## Common scenarios
+
+### Keyboard shortcuts / help dialog
+
+```erb
+<%= static_modal_template("shortcuts", title: "Keyboard shortcuts") do %>
+  <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+    <dt class="font-mono">?</dt><dd>Open this dialog</dd>
+    <dt class="font-mono">g h</dt><dd>Go home</dd>
+    <dt class="font-mono">/</dt><dd>Focus search</dd>
   </dl>
 <% end %>
 
-<%# Drawer / offcanvas %>
-<%= static_drawer_template("filters", position: :right, size: :lg, title: "Filters") do |m| %>
-  <p>Anything goes here.</p>
-<% end %>
-
-<%# Trigger button (works for both) %>
-<%= static_modal_trigger("shortcuts", class: "btn btn-primary") do %>
+<%= static_modal_trigger("shortcuts", class: "...") do %>
   Keyboard shortcuts
 <% end %>
 ```
 
-The trigger emits a `<button>` wired to the `static-modal` Stimulus controller:
-
-```html
-<button type="button" class="btn btn-primary"
-        data-controller="static-modal"
-        data-static-modal-id-value="shortcuts"
-        data-action="click->static-modal#open">
-  Keyboard shortcuts
-</button>
-```
-
-When clicked, it clones the `<template>` content into `document.body`. UTMR's modal Stimulus controller (the forked copy) then connects to the cloned `<dialog>` and animates it open. ESC, the close button, and outside-clicks all dismiss as usual.
-
-### Lower-level helpers
-
-If you need to render a dialog directly (no `<template>` wrap, no trigger), use:
+### Confirmation dialog
 
 ```erb
-<%= static_modal(title: "…") do |m| %>…<% end %>
-<%= static_drawer(position: :right, size: :md, title: "…") do |m| %>…<% end %>
+<%= static_modal_template("confirm-delete", title: "Are you sure?") do |m| %>
+  <% m.footer do %>
+    <div class="flex justify-end gap-2 w-full">
+      <button type="button" data-action="modal#hideModal" class="...">Cancel</button>
+      <%= button_to "Delete", thing_path(@thing), method: :delete, class: "..." %>
+    </div>
+  <% end %>
+  <p>This will permanently delete <strong><%= @thing.name %></strong>. This cannot be undone.</p>
+<% end %>
+
+<%= static_modal_trigger("confirm-delete", class: "text-red-600") do %>
+  Delete…
+<% end %>
 ```
 
-These accept every option UTMR's `modal()` / `drawer()` helpers accept, including the `m.title { … }` / `m.footer { … }` block DSL. The dialog opens immediately on connect, so they're typically only useful inside a `<template>` you'll clone yourself, or wrapped in your own conditional rendering.
+`data-action="modal#hideModal"` on the Cancel button calls UTMR's modal Stimulus controller to dismiss the dialog. (Pulled in by the install generator — you don't need to wire it up.)
 
-### Drawer sizes and positions
+### Navigation drawer (offcanvas)
 
-`static_drawer` / `static_drawer_template` accept the same options UTMR supports: `position: :right` or `:left`, and `size: :xs`, `:sm`, `:md`, `:lg`, `:xl`, `:"2xl"`, `:full`, or any CSS length string.
+```erb
+<%= static_drawer_template("nav", position: :left, size: :lg, title: "Navigation") do %>
+  <ul class="space-y-2">
+    <li><%= link_to "Home", root_path, data: { turbo_frame: "_top" } %></li>
+    <li><%= link_to "Settings", settings_path, data: { turbo_frame: "_top" } %></li>
+  </ul>
+<% end %>
 
-### Header, footer, dividers, overlay
-
-All of UTMR's options pass through:
-
-- `title:` — modal/drawer title text
-- `header: false` — hide the header entirely
-- `header_divider: false` / `footer_divider: false` — turn dividers off
-- `close_button: false` — hide the close button
-- `overlay: false` — undimmed backdrop
-- `padding: false` — remove content padding
-
-## How it works
-
-```ruby
-module UltimateStaticModal
-  def build_static_subclass(flavor_class)
-    Class.new(flavor_class) do
-      def view_template(&block)
-        drawer? ? render_drawer(&block) : render_modal(&block)
-      end
-    end
-  end
-end
+<%= static_modal_trigger("nav", class: "...") do %>
+  ☰ Menu
+<% end %>
 ```
 
-That's the entire server-side mechanism: a runtime subclass of whatever flavor UTMR is configured with (Tailwind, vanilla, custom), with `view_template` overridden to skip UTMR's `turbo_frame?` early-return. Class constants, inline `<style>`, data attributes, and Phlex rendering all come straight from UTMR.
+The `data: { turbo_frame: "_top" }` is important — without it, Turbo can capture in-drawer link clicks and route them into the layout's empty modal frame instead of navigating the page. See [Troubleshooting](#troubleshooting).
 
-## Why we ship a forked controller
+### Filter sidebar (no overlay)
 
-UTMR's Stimulus controller assumes every `<dialog>` it manages is wrapped in a `<turbo-frame>` (because every dialog UTMR itself renders *is* wrapped in one). Three places dispatch lifecycle events on that frame:
-
-```js
-this.turboFrame.dispatchEvent(event);  // throws if turboFrame is null
+```erb
+<%= static_drawer_template("filters", position: :right, title: "Filters", overlay: false) do %>
+  <%# Your filter form here. Stays visible without dimming the page behind it. %>
+<% end %>
 ```
 
-For static modals, there is no enclosing frame. On the first close attempt, `hideModal` sets `this.hidingModal = true` and *then* throws on `dispatchEvent`. Every click after that is short-circuited by the `if (this.hidingModal) return false` guard, so the modal becomes un-closeable.
+## Helpers
 
-We could wrap our static dialogs in a sentinel `<turbo-frame id="modal">` that never navigates — and an earlier prototype did exactly that — but Turbo's frame routing then traps any `<a>` or `<button>` inside the modal and tries to swap their target into the layout's empty modal frame. Drawer nav links blanked out instead of navigating the page.
+| Helper | What it does |
+| --- | --- |
+| `static_modal_template(id, **opts, &block)` | Emits a `<template id="…">` wrapping a static modal. |
+| `static_drawer_template(id, **opts, &block)` | Emits a `<template id="…">` wrapping a static drawer. |
+| `static_modal_trigger(template_id, **html_opts, &block)` | Emits a `<button>` that clones the template into the DOM on click. Works for both modals and drawers. |
+| `static_modal(**opts, &block)` | Renders the bare `<dialog>` markup with no `<template>` wrap. Use only when you're wrapping it yourself. |
+| `static_drawer(**opts, &block)` | Same, but for drawers. |
 
-Instead we ship a fork of `modal_controller.js` with a single substantive change: a `#eventTarget()` helper that returns `this.turboFrame ?? this.element`. All three dispatch sites route through it. We also added one branch to `submitEnd`: when a redirected form response comes back and there's no `<turbo-frame>` ancestor, close the modal with a promise and `Turbo.visit(response.url)` directly — UTMR's normal flow defers this to a `turbo:frame-missing` handler that won't fire without a frame.
+All `**opts` accept everything UTMR's `modal()` / `drawer()` accept, including the block DSL (`m.title { … }`, `m.footer { … }`).
 
-The two patches are exercised by `javascript/modal_controller.test.js`, which also includes a regression guard ensuring the new `submitEnd` branch is correctly gated on `!this.turboFrame` (so UTMR's normal redirect flow is preserved when a frame *is* present).
+## Options
 
-If UTMR adopts an equivalent change upstream, this fork goes away and the gem becomes a pure server-side add-on.
+These pass through to UTMR's flavor classes — see [UTMR's README](https://github.com/cmer/ultimate_turbo_modal#configuration-options) for the full list. The most useful ones:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `title:` | `nil` | Title text rendered in the header |
+| `header:` | `true` | Show the header bar at all |
+| `header_divider:` | `true` (modal) / `false` (drawer) | Show a divider line under the header |
+| `footer_divider:` | `true` | Show a divider line above the footer |
+| `close_button:` | `true` | Show the X button |
+| `padding:` | `true` | Pad the body content |
+| `overlay:` | `true` | Dim the rest of the page when open |
+| `position:` | `:right` (drawer only) | `:right` or `:left` |
+| `size:` | `:md` (drawer only) | `:xs`, `:sm`, `:md`, `:lg`, `:xl`, `:"2xl"`, `:full`, or any CSS length string |
+
+## Troubleshooting
+
+**Nothing happens when I click the trigger button.**
+
+Most likely you skipped a step after installing:
+- Did the generator run? You should see `app/javascript/controllers/static_modal_controller.js` and `modal_controller.js` and a `register("static-modal", …)` line in `controllers/index.js`.
+- Did you rebuild your JS bundle? (`npm run build`, or whatever your bundler command is.)
+- Did you restart Rails? View helpers are loaded by a Railtie, which only runs on boot.
+
+**The button has no background color (or text is invisible).**
+
+If you used a Tailwind utility class that wasn't in any other file before, Tailwind hasn't compiled it yet. Rebuild your CSS bundle (`npm run build:css`).
+
+**`NoMethodError: undefined method 'static_modal_template' for #<...>`**
+
+Restart Rails. The helper module is included into `ActionView::Base` by a Railtie at boot time.
+
+**Links inside a static drawer don't navigate — the drawer just blanks out.**
+
+Add `data: { turbo_frame: "_top" }` to the link. Turbo's frame routing assumes any `<a>` inside a "modal" context targets a Turbo Frame named `modal`, and your layout almost certainly has an empty `<turbo-frame id="modal">` waiting. The `_top` target tells Turbo to navigate the whole page instead.
+
+## How it works (short version)
+
+Server side: a tiny Phlex subclass overrides UTMR's `view_template` to skip the `turbo_frame?` guard, so the dialog markup renders unconditionally. About 15 lines of Ruby.
+
+Client side: the install generator ships a `static-modal` Stimulus controller (clones a `<template>` on click) and a forked copy of UTMR's `modal_controller.js` with one substantive patch — close events fall back to `this.element` when there's no enclosing `<turbo-frame>`. Without that patch, the close button breaks on first click for any UTMR dialog rendered outside a frame.
+
+For the long version, including why we don't just wrap the dialog in a sentinel `<turbo-frame>`, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Status
 
-Experimental. Used in production-adjacent projects and being dogfooded. The plan is to propose folding the null-safe controller behavior into UTMR itself; if that lands, this gem drops the forked controller and shrinks to just the view helpers.
+Experimental but stable enough to use. Actively dogfooded. The plan is to propose folding the null-safe controller behavior upstream into UTMR; if that lands, this gem drops the forked controller and shrinks to just the view helpers.
 
 ## Development
 
@@ -137,7 +182,11 @@ Experimental. Used in production-adjacent projects and being dogfooded. The plan
 cd javascript && npm install && npm test
 ```
 
-The Ruby gem has no test suite. UTMR also has none, and the gem is small enough that the JS tests plus manual smoke-testing in a host app cover the load-bearing behavior.
+There's no Ruby test suite. UTMR has none either, and the gem is small enough that the JS tests plus manual smoke-testing in a host app cover the load-bearing behavior.
+
+## Contributing
+
+Issues and PRs welcome at <https://github.com/firstdraft/ultimate_static_modal>.
 
 ## License
 
