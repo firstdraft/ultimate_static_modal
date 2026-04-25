@@ -2,9 +2,9 @@
 
 Render [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal)'s polished modal and drawer chrome on content that doesn't need to come from the server. Help popovers, confirmation dialogs, navigation drawers, on-page filter UIs — anything that doesn't deserve its own URL.
 
-<!-- TODO: drop a screenshot or animated GIF of the /testing/static demo page here. -->
-
 [![Gem Version](https://img.shields.io/gem/v/ultimate_static_modal.svg)](https://rubygems.org/gems/ultimate_static_modal)
+
+> Visual examples of the modal and drawer chrome live in [UTMR's README](https://github.com/cmer/ultimate_turbo_modal#readme) — this gem renders identical chrome.
 
 ## Why this exists
 
@@ -48,8 +48,6 @@ The generator copies two Stimulus controllers into `app/javascript/controllers/`
 ### 3. Click the button
 
 The button clones the `<template>` into the page, the modal animates open, ESC / close button / outside-click all dismiss it. Done.
-
-<!-- TODO: screenshot of the result. -->
 
 ## Common scenarios
 
