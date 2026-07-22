@@ -8,6 +8,7 @@
   },
   "devDependencies": {
     "@hotwired/stimulus": "^3.2.2",
-    "happy-dom": "^15.11.7"
+    "happy-dom": "^20.11.1",
+    "ultimate_turbo_modal": "3.2.1"
   }
 }

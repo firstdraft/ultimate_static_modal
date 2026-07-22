@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 — 2026-07-22
+
+- Replaced the copied UTMR Stimulus controller with a small subclass adapter,
+  so static and Turbo-backed modals inherit the installed UTMR controller's
+  fixes and features.
+- Added integration coverage against the published UTMR JavaScript package for
+  both frameless and Turbo Frame-backed dialogs.
+- Updated the install generator to follow UTMR's current `index.js` and
+  `application.js` Stimulus layouts, with generator integration coverage.
+- Raised the supported UTMR range to 3.2.1 or newer within the 3.x series.
+
 ## 0.1.0 — 2026-04-24
 
 Initial release.

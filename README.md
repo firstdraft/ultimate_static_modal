@@ -14,7 +14,7 @@ But sometimes you just want a modal — no route, no controller action, no Turbo
 
 ## Requirements
 
-You need [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal) v3+ already installed and working in your Rails app. If `link_to ..., data: { turbo_frame: "modal" }` already opens a working modal, you're good. If not, install UTMR first.
+You need [ultimate_turbo_modal](https://github.com/cmer/ultimate_turbo_modal) 3.2.1 or newer within the 3.x series already installed and working in your Rails app. Keep its Ruby gem and npm package on the same version. If `link_to ..., data: { turbo_frame: "modal" }` already opens a working modal, you're good. If not, install UTMR first.
 
 ## Quickstart
 
@@ -30,7 +30,7 @@ bundle install
 bin/rails generate ultimate_static_modal:install
 ```
 
-The generator copies two Stimulus controllers into `app/javascript/controllers/` and wires them up in `controllers/index.js`. Rebuild your JS bundle and restart Rails.
+The generator copies two Stimulus controllers into `app/javascript/controllers/` and wires them into the same Stimulus module that registers UTMR (`controllers/index.js` or `controllers/application.js`). Rebuild your JS bundle and restart Rails.
 
 ### 2. Add a modal to any page
 
@@ -92,8 +92,8 @@ The button clones the `<template>` into the page, the modal animates open, ESC /
 ```erb
 <%= static_drawer_template("nav", position: :left, size: :lg, title: "Navigation") do %>
   <ul class="space-y-2">
-    <li><%= link_to "Home", root_path, data: { turbo_frame: "_top" } %></li>
-    <li><%= link_to "Settings", settings_path, data: { turbo_frame: "_top" } %></li>
+    <li><%= link_to "Home", root_path %></li>
+    <li><%= link_to "Settings", settings_path %></li>
   </ul>
 <% end %>
 
@@ -102,7 +102,7 @@ The button clones the `<template>` into the page, the modal animates open, ESC /
 <% end %>
 ```
 
-The `data: { turbo_frame: "_top" }` is important — without it, Turbo can capture in-drawer link clicks and route them into the layout's empty modal frame instead of navigating the page. See [Troubleshooting](#troubleshooting).
+Because static drawers are not wrapped in a Turbo Frame, ordinary links navigate normally.
 
 ### Filter sidebar (no overlay)
 
@@ -145,7 +145,7 @@ These pass through to UTMR's flavor classes — see [UTMR's README](https://gith
 **Nothing happens when I click the trigger button.**
 
 Most likely you skipped a step after installing:
-- Did the generator run? You should see `app/javascript/controllers/static_modal_controller.js` and `modal_controller.js` and a `register("static-modal", …)` line in `controllers/index.js`.
+- Did the generator run? You should see `app/javascript/controllers/static_modal_controller.js` and `modal_controller.js` and a `register("static-modal", …)` line in `controllers/index.js` or `controllers/application.js`.
 - Did you rebuild your JS bundle? (`npm run build`, or whatever your bundler command is.)
 - Did you restart Rails? View helpers are loaded by a Railtie, which only runs on boot.
 
@@ -157,26 +157,25 @@ If you used a Tailwind utility class that wasn't in any other file before, Tailw
 
 Restart Rails. The helper module is included into `ActionView::Base` by a Railtie at boot time.
 
-**Links inside a static drawer don't navigate — the drawer just blanks out.**
-
-Add `data: { turbo_frame: "_top" }` to the link. Turbo's frame routing assumes any `<a>` inside a "modal" context targets a Turbo Frame named `modal`, and your layout almost certainly has an empty `<turbo-frame id="modal">` waiting. The `_top` target tells Turbo to navigate the whole page instead.
-
 ## How it works (short version)
 
 Server side: a tiny Phlex subclass overrides UTMR's `view_template` to skip the `turbo_frame?` guard, so the dialog markup renders unconditionally. About 15 lines of Ruby.
 
-Client side: the install generator ships a `static-modal` Stimulus controller (clones a `<template>` on click) and a forked copy of UTMR's `modal_controller.js` with one substantive patch — close events fall back to `this.element` when there's no enclosing `<turbo-frame>`. Without that patch, the close button breaks on first click for any UTMR dialog rendered outside a frame.
+Client side: the install generator ships a `static-modal` Stimulus controller that clones a `<template>` on click, plus a small subclass of UTMR's exported controller. The subclass treats a frameless dialog as its own lifecycle-event target and handles redirects from forms inside static dialogs. Everything else — opening, animation, stacking, scroll locking, Escape handling, and cleanup — comes from the installed UTMR package.
 
 For the long version, including why we don't just wrap the dialog in a sentinel `<turbo-frame>`, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Status
 
-Experimental but stable enough to use. Actively dogfooded. The plan is to propose folding the null-safe controller behavior upstream into UTMR; if that lands, this gem drops the forked controller and shrinks to just the view helpers.
+Experimental but stable enough to use. This gem does not carry a source fork of UTMR; its controller adapter is tested against the published UTMR package so compatibility failures surface during development.
 
 ## Development
 
 ```sh
-# JS unit tests for the forked controller
+# Ruby generator tests
+bundle install && bundle exec rake test
+
+# JS integration tests for the UTMR controller adapter
 cd javascript && npm install && npm test
 ```
 

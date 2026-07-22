@@ -9,17 +9,20 @@ Gem::Specification.new do |spec|
   spec.email = ["raghu@firstdraft.com"]
 
   spec.summary = "Static-content companion to ultimate_turbo_modal."
-  spec.description = "View helpers and Stimulus controllers for rendering ultimate_turbo_modal's <dialog> chrome on content that is not loaded via a Turbo Frame. Reuses UTMR's flavor classes; ships a small null-safe fork of UTMR's modal controller via an install generator."
+  spec.description = "View helpers and Stimulus controllers for rendering ultimate_turbo_modal's <dialog> chrome on content that is not loaded via a Turbo Frame. Reuses UTMR's flavor classes and extends its exported Stimulus controller with a small frameless adapter."
   spec.homepage = "https://github.com/firstdraft/ultimate_static_modal"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2"
 
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["source_code_uri"] = "#{spec.homepage}/tree/v#{spec.version}"
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
   spec.files = Dir["lib/**/*", "VERSION", "README.md", "CHANGELOG.md", "LICENSE*"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "ultimate_turbo_modal", ">= 3.0"
+  spec.add_dependency "ultimate_turbo_modal", ">= 3.2.1", "< 4"
+
+  spec.add_development_dependency "minitest", "~> 6.0"
+  spec.add_development_dependency "rake", "~> 13.4"
 end

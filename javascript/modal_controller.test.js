@@ -1,17 +1,4 @@
-// Tests for the two patches we own on top of UTMR's modal_controller.js:
-//
-//   1. #eventTarget() falls back to this.element when this.turboFrame is null,
-//      so hideModal() can dispatch modal:closing without an enclosing
-//      <turbo-frame>.
-//   2. submitEnd() handles redirected responses without a <turbo-frame> by
-//      closing the modal and calling Turbo.visit, instead of stashing the URL
-//      for a turbo:frame-missing handler that will never fire.
-//
-// These are the only places where our fork meaningfully diverges from UTMR.
-// If they regress (e.g. during a re-fork against newer UTMR), close behaviour
-// breaks silently for static modals.
-
-import { test, before, beforeEach } from "node:test"
+import { test, before, beforeEach, afterEach } from "node:test"
 import assert from "node:assert/strict"
 import { Window } from "happy-dom"
 import { Application } from "@hotwired/stimulus"
@@ -32,9 +19,9 @@ const CONTROLLER_PATH = join(
 )
 
 let ModalController
+let UltimateTurboModalController
 
 before(async () => {
-  // Set up a happy-dom window/document and the globals the controller touches.
   const window = new Window({ url: "https://example.test/" })
   const document = window.document
   globalThis.window = window
@@ -46,19 +33,25 @@ before(async () => {
   globalThis.MutationObserver = window.MutationObserver
   globalThis.NodeFilter = window.NodeFilter
   globalThis.ErrorEvent = window.ErrorEvent
+  globalThis.CSS = window.CSS
+  globalThis.getComputedStyle = window.getComputedStyle.bind(window)
   globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0)
   globalThis.cancelAnimationFrame = (id) => clearTimeout(id)
   globalThis.history = window.history
+  window.scrollTo = () => {}
 
-  // The controller imports `@hotwired/stimulus` from the package name. Rewrite
-  // that to a resolvable file URL so we can dynamic-import it from a temp file.
-  const stimulusEntry = pathToFileURL(
-    join(__dirname, "node_modules", "@hotwired", "stimulus", "dist", "stimulus.js")
-  )
+  const ultimateTurboModalEntry = import.meta.resolve("ultimate_turbo_modal")
+  const turbo = { StreamActions: {} }
+  globalThis.Turbo = turbo
+  window.Turbo = turbo
+
+  const upstream = await import(ultimateTurboModalEntry)
+  UltimateTurboModalController = upstream.UltimateTurboModalController
+
   const src = readFileSync(CONTROLLER_PATH, "utf8")
   const rewritten = src.replace(
-    /from\s+["']@hotwired\/stimulus["']/,
-    `from "${stimulusEntry.href}"`
+    /from\s+["']ultimate_turbo_modal["']/,
+    `from "${ultimateTurboModalEntry}"`
   )
 
   const tmp = mkdtempSync(join(tmpdir(), "ultimate-static-modal-"))
@@ -71,15 +64,24 @@ before(async () => {
 let app
 let dialog
 let controller
+let turboFrame
 
-beforeEach(async () => {
+beforeEach(() => {
   document.body.innerHTML = ""
   document.body.removeAttribute("data-turbo-modal-history-advanced")
+  window.Turbo.visit = () => {}
+})
 
-  // Build a dialog that matches the chrome our gem renders, minus the
-  // <turbo-frame> wrapper. This is the "static modal" topology.
+afterEach(async () => {
+  document.body.innerHTML = ""
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  app?.stop()
+})
+
+async function mountController({ framed = false } = {}) {
   dialog = document.createElement("dialog")
   dialog.id = "modal-container"
+  dialog.className = "utmr"
   dialog.setAttribute("data-controller", "modal")
   dialog.setAttribute("data-modal-target", "container")
 
@@ -90,28 +92,41 @@ beforeEach(async () => {
   content.setAttribute("data-modal-target", "content")
   inner.appendChild(content)
   dialog.appendChild(inner)
-  document.body.appendChild(dialog)
 
-  // Stub the native dialog APIs happy-dom doesn't implement.
   dialog.showModal = () => { dialog.setAttribute("open", "") }
   dialog.close = () => { dialog.removeAttribute("open") }
+
+  if (framed) {
+    turboFrame = document.createElement("turbo-frame")
+    turboFrame.id = "modal"
+    turboFrame.appendChild(dialog)
+    document.body.appendChild(turboFrame)
+  } else {
+    turboFrame = null
+    document.body.appendChild(dialog)
+  }
 
   app = Application.start()
   app.register("modal", ModalController)
 
-  // Wait a tick for Stimulus to wire up the controller and run connect().
   await new Promise((r) => setTimeout(r, 0))
 
   controller = app.getControllerForElementAndIdentifier(dialog, "modal")
   assert.ok(controller, "controller should be connected")
-  assert.equal(controller.turboFrame, null, "no <turbo-frame> ancestor in this topology")
-
-  // Pretend the modal has finished entering so closing has a clean starting
-  // state. We're not testing the enter animation here.
   dialog.setAttribute("data-entered", "")
+}
+
+test("frameless dialogs adapt UTMR's current controller instead of copying it", async () => {
+  await mountController()
+
+  assert.ok(controller instanceof UltimateTurboModalController)
+  assert.equal(controller.frameless, true)
+  assert.equal(controller.turboFrame, dialog)
+  assert.equal(typeof controller.dialogMousedown, "function")
 })
 
-test("hideModal without a <turbo-frame> ancestor dispatches modal:closing on the element and does not throw", () => {
+test("hideModal dispatches lifecycle events on a frameless dialog", async () => {
+  await mountController()
   let captured = null
   dialog.addEventListener("modal:closing", (event) => {
     captured = event
@@ -123,19 +138,11 @@ test("hideModal without a <turbo-frame> ancestor dispatches modal:closing on the
   assert.equal(controller.hidingModal, true)
 })
 
-test("submitEnd: redirected response without a <turbo-frame> closes the modal then Turbo.visits the redirect URL", async () => {
-  const visited = []
-  window.Turbo = { visit: (url) => visited.push(url) }
-
-  // We're not exercising the close animation here — that's UTMR's territory.
-  // Stub the close path to resolve immediately and verify the new branch
-  // actually wires into Turbo.visit.
-  let promiseResolved = false
-  controller.hideModalWithPromise = (opts) => {
-    promiseResolved = true
-    controller._lastHidePromiseOpts = opts
-    return Promise.resolve()
-  }
+test("redirected submissions from frameless dialogs close before visiting", async () => {
+  await mountController()
+  const lifecycle = []
+  window.Turbo = { visit: (url) => lifecycle.push(`visit:${url}`) }
+  dialog.addEventListener("modal:closed", () => lifecycle.push("closed"))
 
   controller.submitEnd({
     detail: {
@@ -146,19 +153,21 @@ test("submitEnd: redirected response without a <turbo-frame> closes the modal th
     }
   })
 
-  // Let the promise chain settle.
+  assert.deepEqual(lifecycle, [], "navigation waits for the close lifecycle")
+  assert.equal(dialog.hasAttribute("data-closing"), true)
+  assert.equal(controller._skipHistoryBack, true)
+
+  dialog.querySelector("#modal-inner").dispatchEvent(
+    new Event("transitionend", { bubbles: true })
+  )
   await new Promise((r) => setTimeout(r, 0))
 
-  assert.equal(promiseResolved, true, "hideModalWithPromise was called")
-  assert.deepEqual(controller._lastHidePromiseOpts, { skipHistoryBack: true })
-  assert.deepEqual(visited, ["/after-submit"])
+  assert.equal(dialog.isConnected, false)
+  assert.deepEqual(lifecycle, ["closed", "visit:/after-submit"])
 })
 
-test("submitEnd: redirected response with a <turbo-frame> ancestor stashes the URL (regression guard for the UTMR path)", () => {
-  // Sanity check that our patch is gated on `!this.turboFrame` and we don't
-  // accidentally Turbo.visit when UTMR's normal frame-missing flow should run.
-  controller.turboFrame = document.createElement("turbo-frame")
-
+test("framed dialogs preserve UTMR's controller and redirect behavior", async () => {
+  await mountController({ framed: true })
   const visited = []
   window.Turbo = { visit: (url) => visited.push(url) }
 
@@ -172,5 +181,8 @@ test("submitEnd: redirected response with a <turbo-frame> ancestor stashes the U
   })
 
   assert.deepEqual(visited, [], "Turbo.visit must not fire when a turbo-frame is present")
+  assert.ok(controller instanceof UltimateTurboModalController)
+  assert.equal(controller.frameless, false)
+  assert.equal(controller.turboFrame, turboFrame)
   assert.equal(controller._pendingRedirectUrl, "/should-not-visit", "URL is stashed for the frame-missing path")
 })

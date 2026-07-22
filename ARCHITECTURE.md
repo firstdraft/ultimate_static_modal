@@ -24,7 +24,7 @@ end
 
 That's it. We dynamically subclass whichever flavor UTMR is configured with (Tailwind, vanilla, custom) and replace `view_template` with one that always renders the dialog. Class constants, inline `<style>`, data attributes, and Phlex composition all come from UTMR unchanged. If UTMR adds a new option or restructures the chrome, we inherit it for free.
 
-## Client side: why we ship a forked controller
+## Client side: why we ship an adapter
 
 UTMR's Stimulus controller assumes every `<dialog>` it manages has a `<turbo-frame>` ancestor. Three places dispatch lifecycle events on that frame:
 
@@ -56,9 +56,24 @@ But it broke navigation. Turbo's frame routing intercepts any `<a>` click inside
 
 You can't fix this with `data-turbo-frame="_top"` on every link without making it the user's job to remember it on every link inside any static modal. Wrong tradeoff.
 
-### Approach we shipped: fork the controller
+### Approach we shipped: subclass the controller
 
-The install generator copies a forked `modal_controller.js` into the host app. The fork has one substantive change — a `#eventTarget()` helper that returns `this.turboFrame ?? this.element` — and routes the three dispatch sites through it. UTMR's npm package is still imported for its `turbo:frame-missing` / `turbo:before-frame-render` / `turbo:before-cache` side-effect handlers. The host app registers our forked controller as `"modal"` instead of UTMR's.
+UTMR exports its Stimulus controller, so the install generator copies a small subclass into the host app instead of copying UTMR's source. The host app registers that adapter as `"modal"`:
+
+```js
+import { UltimateTurboModalController } from "ultimate_turbo_modal"
+
+export default class extends UltimateTurboModalController {
+  connect() {
+    super.connect()
+
+    this.frameless = !this.turboFrame
+    if (this.frameless) this.turboFrame = this.element
+  }
+}
+```
+
+UTMR sets `turboFrame` during `connect()`, but does not need it until the close flow begins. The adapter records whether the dialog was frameless and, in that case, points `turboFrame` at the dialog itself. UTMR's inherited lifecycle methods can then dispatch and listen on that element without any copied implementation. Framed dialogs keep their real Turbo Frame and follow the upstream path unchanged.
 
 We also added one branch to `submitEnd`. UTMR's flow for a redirected form response is:
 
@@ -67,26 +82,30 @@ We also added one branch to `submitEnd`. UTMR's flow for a redirected form respo
 3. `turbo:frame-missing` fires on the modal frame.
 4. UTMR's index.js handler reads `_pendingRedirectUrl` and runs a smooth-redirect (morph + close + navigate).
 
-For static modals, step 3 never happens — there is no frame. So we added: when `!this.turboFrame && response.redirected`, close the modal with `hideModalWithPromise({ skipHistoryBack: true })` and then `Turbo.visit(response.url)` directly.
+For static modals, step 3 never happens — there is no frame. The adapter therefore overrides only `submitEnd`: when a frameless dialog receives a redirected response, it closes with `hideModalWithPromise({ skipHistoryBack: true })` and then calls `Turbo.visit(response.url)`. Every other submission delegates to UTMR.
 
 ## Tests
 
-`javascript/modal_controller.test.js` exercises the two patches we own:
+`javascript/modal_controller.test.js` exercises the adapter against the actual published UTMR package:
 
-1. `hideModal` without a `<turbo-frame>` ancestor dispatches `modal:closing` on `this.element` and doesn't throw.
-2. `submitEnd` with a redirected response and no `<turbo-frame>` triggers `Turbo.visit(response.url)` after closing.
-3. (Regression guard) `submitEnd` with a `<turbo-frame>` present still stashes `_pendingRedirectUrl` so UTMR's normal smooth-redirect flow continues to work.
+1. The installed controller is an instance of UTMR's exported controller and inherits current upstream methods.
+2. `hideModal` without a `<turbo-frame>` ancestor dispatches `modal:closing` on the dialog and doesn't throw.
+3. `submitEnd` with a redirected response and no `<turbo-frame>` triggers `Turbo.visit(response.url)` after closing.
+4. A controller with a `<turbo-frame>` ancestor preserves UTMR's normal event target and smooth-redirect setup.
 
-The tests use `node:test` + `happy-dom` + a real Stimulus `Application.start()` so the controller goes through the actual connect/disconnect lifecycle. The controller source is loaded from the install-generator template — there's no separate test copy that could drift.
+The tests use `node:test` + `happy-dom` + a real Stimulus `Application.start()` so the adapter and upstream controller go through the actual connect/disconnect lifecycle. The adapter source is loaded from the install-generator template, while `ultimate_turbo_modal` resolves from npm just as it does in a host app.
+
+The Ruby generator tests cover both Stimulus layouts recognized by UTMR 3.2.1:
+an `index.js` that starts the application directly and the standard split layout
+where `Application.start()` lives in `application.js`. In both cases the test
+verifies that UTMR's registration is replaced by the adapter.
 
 ## Drift risk
 
-The controller file is a verbatim copy of UTMR's `modal_controller.js` plus the patches above. When UTMR releases a new version of that file, we'll need to re-fork: copy the new version, re-apply the `#eventTarget()` and `submitEnd` patches, run the tests. The tests are designed to fail loudly if the patches go missing during that process.
-
-The longer-term fix is to upstream the null-safe behavior into UTMR. The change is tiny (~5 lines), benefits anyone using UTMR's controller outside a Turbo-Frame context, and would let this gem drop the forked controller entirely.
+There is no copied UTMR implementation to rebase. The adapter still relies on UTMR exporting `UltimateTurboModalController`, setting `turboFrame` during `connect()`, and exposing `submitEnd` and `hideModalWithPromise`. The gem therefore requires UTMR 3.2.1 or newer within the 3.x series, and the JavaScript tests pin the same published package version. Before widening that range or adopting UTMR 4, update the test dependency and run the integration suite.
 
 ## What this gem is NOT
 
 - A general modal library. The animations, focus trapping, scroll lock, and ESC handling are all UTMR's. We're a thin server-and-distribution adapter.
 - A replacement for UTMR. If your modal has its own URL (forms, show pages, anything Rails-rendered), use UTMR's `modal()` directly. Static modals are the leftover use case.
-- A long-term fork. If UTMR adopts the null-safe controller change, this gem shrinks back to a pure server-side helper add-on.
+- A source fork. Static dialogs use a small subclass of the installed UTMR controller, so upstream fixes remain available to both static and Turbo-backed modals.
